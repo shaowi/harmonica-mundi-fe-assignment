@@ -1,38 +1,62 @@
-import { useQuery } from '@tanstack/react-query'
-import { apiFetch } from './api/client'
-import type { Health } from './api/types'
+import { useDashboardData } from './api/dashboard'
+import { Dashboard } from './components/dashboard/Dashboard'
+import { DashboardError } from './components/dashboard/DashboardError'
+import { DashboardSkeleton } from './components/dashboard/DashboardSkeleton'
+import { Header } from './components/layout/Header'
+import { useTheme } from './hooks/useTheme'
+
+import './components/ui/ui.css'
+import './components/layout/Header.css'
+import './components/dashboard/Dashboard.css'
 
 export default function App() {
-  const health = useQuery({
-    queryKey: ['health'],
-    queryFn: () => apiFetch<Health>('/api/health'),
-    retry: false,
-  })
+  const {
+    customer,
+    accounts,
+    depositAccounts,
+    totalAvailable,
+    transactions,
+    isPending,
+    isError,
+    refetch,
+  } = useDashboardData()
 
-  const status = health.isPending
-    ? 'checking…'
-    : health.isError
-      ? 'not connected'
-      : 'connected'
+  const { theme, segment, toggleTheme, setSegment } = useTheme(customer?.segment)
+
+  const handleNewTransfer = () => {
+    // The transfer dialog component can be wired here when built
+    console.info('New transfer triggered')
+  }
+
+  const customerInitials = customer
+    ? `${customer.firstName[0]}${customer.lastName[0]}`.toUpperCase()
+    : 'AC'
 
   return (
-    <div className="starter">
-      <header className="starter-header">
-        <strong>Meridian</strong>
-        <span>Take-home starter</span>
-      </header>
+    <div className="app-shell">
+      <Header
+        theme={theme}
+        segment={segment}
+        onToggleTheme={toggleTheme}
+        onSegmentChange={setSegment}
+        customerInitials={customerInitials}
+      />
 
-      <main className="starter-main">
-        <h1>Build the dashboard and transfer flow</h1>
-        <p>
-          Start with <code>README.md</code>, then read{' '}
-          <code>brief/candidate-brief.md</code>. Replace this screen with your
-          app.
-        </p>
-
-        <p className="status" role="status">
-          Mock API: {status}
-        </p>
+      <main id="main-content">
+        {isError ? (
+          <DashboardError onRetry={refetch} />
+        ) : isPending ? (
+          <DashboardSkeleton />
+        ) : (
+          <Dashboard
+            customer={customer}
+            accounts={accounts}
+            depositAccounts={depositAccounts}
+            totalAvailable={totalAvailable}
+            transactions={transactions}
+            onNewTransfer={handleNewTransfer}
+          />
+        )}
       </main>
     </div>
   )
