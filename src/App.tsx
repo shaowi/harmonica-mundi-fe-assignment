@@ -1,8 +1,10 @@
+import { useState } from 'react'
 import { useDashboardData } from './api/dashboard'
 import { Dashboard } from './components/dashboard/Dashboard'
 import { DashboardError } from './components/dashboard/DashboardError'
 import { DashboardSkeleton } from './components/dashboard/DashboardSkeleton'
 import { Header } from './components/layout/Header'
+import { TransferDialog } from './components/transfer/TransferDialog'
 import { useTheme } from './hooks/useTheme'
 
 import './components/ui/ui.css'
@@ -15,6 +17,7 @@ export default function App() {
     accounts,
     depositAccounts,
     totalAvailable,
+    remainingDailyLimit,
     transactions,
     isPending,
     isError,
@@ -23,9 +26,14 @@ export default function App() {
 
   const { theme, segment, toggleTheme, setSegment } = useTheme(customer?.segment)
 
-  const handleNewTransfer = () => {
-    // The transfer dialog component can be wired here when built
-    console.info('New transfer triggered')
+  const [isTransferOpen, setIsTransferOpen] = useState(false)
+  const [transferOpener, setTransferOpener] = useState<HTMLElement | null>(null)
+
+  const handleNewTransfer = (e?: React.MouseEvent<HTMLElement>) => {
+    if (e?.currentTarget) {
+      setTransferOpener(e.currentTarget)
+    }
+    setIsTransferOpen(true)
   }
 
   const customerInitials = customer
@@ -58,6 +66,14 @@ export default function App() {
           />
         )}
       </main>
+
+      <TransferDialog
+        isOpen={isTransferOpen}
+        onClose={() => setIsTransferOpen(false)}
+        depositAccounts={depositAccounts}
+        remainingDailyLimit={remainingDailyLimit}
+        openerElement={transferOpener}
+      />
     </div>
   )
 }
