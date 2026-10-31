@@ -91,6 +91,13 @@ export function TransferDialog({
     }
   }, [payees, form])
 
+  // Set default fromAccountId once depositAccounts are loaded if not already selected
+  useEffect(() => {
+    if (depositAccounts.length > 0 && !form.getValues('fromAccountId')) {
+      form.setValue('fromAccountId', depositAccounts[0].id)
+    }
+  }, [depositAccounts, form])
+
   // Reset dialog state when closed or reopened
   const handleReset = useCallback(() => {
     setCurrentStep(1)

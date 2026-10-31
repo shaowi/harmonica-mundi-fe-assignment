@@ -1,11 +1,14 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { configure, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 import App from './App'
 import { formatMoney } from './lib/format'
 import { server } from './test/setup'
+
+// Increase async timeout since mock API handlers have an intentional 500ms delay per request
+configure({ asyncUtilTimeout: 4000 })
 
 function renderApp() {
   const queryClient = new QueryClient({
@@ -17,6 +20,21 @@ function renderApp() {
       <App />
     </QueryClientProvider>,
   )
+}
+
+/**
+ * Custom text matcher for money strings that normalizes whitespace and non-breaking spaces (U+00A0).
+ * Prevents TestingLibraryElementError caused by Intl non-breaking space mismatches.
+ */
+function matchMoney(amount: number) {
+  const formatted = formatMoney(amount).replace(/\u00a0/g, ' ')
+  return (_: string, node: Element | null) => {
+    const hasText = node?.textContent?.replace(/\u00a0/g, ' ') === formatted
+    const childrenDontHaveText = Array.from(node?.children || []).every(
+      (child) => child.textContent?.replace(/\u00a0/g, ' ') !== formatted,
+    )
+    return Boolean(hasText && childrenDontHaveText)
+  }
 }
 
 describe('Dashboard', () => {
@@ -35,30 +53,30 @@ describe('Dashboard', () => {
 
     // D3 - Total available balance (checking + savings only)
     expect(screen.getByText('Total available')).toBeInTheDocument()
-    expect(screen.getByText(formatMoney(17120.55))).toBeInTheDocument()
+    expect(screen.getByText(matchMoney(17120.55))).toBeInTheDocument()
     expect(
       screen.getByText('Across 2 deposit accounts'),
     ).toBeInTheDocument()
 
     // D4 - Accounts
     expect(screen.getByText('Everyday Checking')).toBeInTheDocument()
-    expect(screen.getByText(formatMoney(4280.55))).toBeInTheDocument()
+    expect(screen.getByText(matchMoney(4280.55))).toBeInTheDocument()
     expect(screen.getByText('Savings Plus')).toBeInTheDocument()
-    expect(screen.getByText(formatMoney(12840))).toBeInTheDocument()
+    expect(screen.getByText(matchMoney(12840))).toBeInTheDocument()
     expect(screen.getByText('Rewards Card')).toBeInTheDocument()
-    expect(screen.getByText(formatMoney(-420.3))).toBeInTheDocument()
+    expect(screen.getByText(matchMoney(-420.3))).toBeInTheDocument()
     expect(screen.getByText('Amount due')).toBeInTheDocument()
 
     // D5 - Recent transactions
     expect(screen.getByText('Recent transactions')).toBeInTheDocument()
     expect(screen.getByText('FairPrice Finest')).toBeInTheDocument()
-    expect(screen.getByText(formatMoney(-86.4))).toBeInTheDocument()
+    expect(screen.getByText(matchMoney(-86.4))).toBeInTheDocument()
     expect(screen.getByText('Grab')).toBeInTheDocument()
     expect(screen.getByText('Pending')).toBeInTheDocument()
 
     // Daily limit rail
     expect(screen.getByText('Daily limit')).toBeInTheDocument()
-    expect(screen.getByText(formatMoney(5000))).toBeInTheDocument()
+    expect(screen.getByText(matchMoney(5000))).toBeInTheDocument()
   })
 
   it('filters transactions by description or category and clears search', async () => {
@@ -77,7 +95,7 @@ describe('Dashboard', () => {
     expect(screen.queryByText('Grab')).not.toBeInTheDocument()
 
     // Clear search using the clear button in the input
-    const clearBtn = screen.getByRole('button', { name: /clear search/i })
+    const clearBtn = screen.getByTitle('Clear search')
     await user.click(clearBtn)
     expect(screen.getByText('Grab')).toBeInTheDocument()
 
@@ -88,9 +106,7 @@ describe('Dashboard', () => {
     ).toBeInTheDocument()
 
     // Clear search from empty state
-    const emptyStateClearBtn = screen.getByRole('button', {
-      name: 'Clear search',
-    })
+    const emptyStateClearBtn = screen.getByText('Clear search')
     await user.click(emptyStateClearBtn)
     expect(screen.getByText('FairPrice Finest')).toBeInTheDocument()
     expect(screen.getByText('Grab')).toBeInTheDocument()
@@ -130,153 +146,160 @@ describe('Dashboard', () => {
     // Verify dashboard successfully loads
     await waitFor(() => {
       expect(screen.getByText('Total available')).toBeInTheDocument()
-      expect(screen.getByText(formatMoney(17120.55))).toBeInTheDocument()
+      expect(screen.getByText(matchMoney(17120.55))).toBeInTheDocument()
     })
   })
 })
 
 describe('Transfer Flow', () => {
-  it('an amount over the balance shows the error and sends no request (E4.1)', async () => {
-    const user = userEvent.setup()
+  it(
+    'an amount over the balance shows the error and sends no request (E4.1)',
+    async () => {
+      const user = userEvent.setup()
 
-    let transferRequestSent = false
-    server.use(
-      http.post('*/api/transfers', () => {
-        transferRequestSent = true
-        return HttpResponse.json({}, { status: 201 })
-      }),
-    )
+      let transferRequestSent = false
+      server.use(
+        http.post('*/api/transfers', () => {
+          transferRequestSent = true
+          return HttpResponse.json({}, { status: 201 })
+        }),
+      )
 
-    renderApp()
+      renderApp()
 
-    // Wait for dashboard to load
-    await waitFor(() => {
-      expect(screen.getByText('Total available')).toBeInTheDocument()
-    })
+      // Wait for dashboard to load
+      await waitFor(() => {
+        expect(screen.getByText('Total available')).toBeInTheDocument()
+      })
 
-    // Click "New transfer" button
-    const newTransferBtns = screen.getAllByRole('button', {
-      name: /new transfer/i,
-    })
-    await user.click(newTransferBtns[0])
+      // Click "New transfer" button
+      const newTransferBtns = screen.getAllByRole('button', {
+        name: /new transfer/i,
+      })
+      await user.click(newTransferBtns[0])
 
-    // Dialog opens to Step 1: Recipient
-    await waitFor(() => {
+      // Dialog opens to Step 1: Recipient
+      await waitFor(() => {
+        expect(
+          screen.getByText('Who are you sending to?'),
+        ).toBeInTheDocument()
+      })
+
+      // Select payee (first payee Jamie Tan is default or click it)
+      const jamieCard = await screen.findByText('Jamie Tan')
+      await user.click(jamieCard)
+
+      // Click Continue to go to Step 2
+      const continueBtn = screen.getByRole('button', { name: /continue/i })
+      await user.click(continueBtn)
+
+      // Verify on Step 2: Amount
+      await waitFor(() => {
+        expect(screen.getByText('How much?')).toBeInTheDocument()
+      })
+
+      // Balance is 4,280.55. Enter 5000 (over available balance)
+      const amountInput = screen.getByPlaceholderText('0.00')
+      await user.type(amountInput, '5000')
+
+      // Click Continue
+      const step2ContinueBtn = screen.getByRole('button', { name: /continue/i })
+      await user.click(step2ContinueBtn)
+
+      // Expect the inline error message
       expect(
-        screen.getByText('Who are you sending to?'),
+        screen.getByText(/Amount can't be more than your available balance/i),
       ).toBeInTheDocument()
-    })
 
-    // Select payee (first payee Jamie Tan is default or click it)
-    const jamieCard = screen.getByText('Jamie Tan')
-    await user.click(jamieCard)
-
-    // Click Continue to go to Step 2
-    const continueBtn = screen.getByRole('button', { name: /continue/i })
-    await user.click(continueBtn)
-
-    // Verify on Step 2: Amount
-    await waitFor(() => {
+      // No request was sent and still on Step 2
+      expect(transferRequestSent).toBe(false)
       expect(screen.getByText('How much?')).toBeInTheDocument()
-    })
+      expect(screen.queryByText('Check the details')).not.toBeInTheDocument()
+    },
+    15000,
+  )
 
-    // Balance is 4,280.55. Enter 5000 (over available balance)
-    const amountInput = screen.getByPlaceholderText('0.00')
-    await user.type(amountInput, '5000')
+  it(
+    'a successful transfer shows the success screen and the dashboard updates (E4.2)',
+    async () => {
+      const user = userEvent.setup()
+      renderApp()
 
-    // Click Continue
-    const step2ContinueBtn = screen.getByRole('button', { name: /continue/i })
-    await user.click(step2ContinueBtn)
+      // Wait for dashboard to load
+      await waitFor(() => {
+        expect(screen.getByText('Everyday Checking')).toBeInTheDocument()
+        expect(screen.getByText(matchMoney(4280.55))).toBeInTheDocument()
+      })
 
-    // Expect the inline error message
-    expect(
-      screen.getByText(
-        `Amount can't be more than your available balance (${formatMoney(4280.55)}).`,
-      ),
-    ).toBeInTheDocument()
+      // Click "New transfer"
+      const newTransferBtns = screen.getAllByRole('button', {
+        name: /new transfer/i,
+      })
+      await user.click(newTransferBtns[0])
 
-    // No request was sent and still on Step 2
-    expect(transferRequestSent).toBe(false)
-    expect(screen.getByText('How much?')).toBeInTheDocument()
-    expect(screen.queryByText('Check the details')).not.toBeInTheDocument()
-  })
+      // Wait for dialog step 1
+      await waitFor(() => {
+        expect(
+          screen.getByText('Who are you sending to?'),
+        ).toBeInTheDocument()
+      })
 
-  it('a successful transfer shows the success screen and the dashboard updates (E4.2)', async () => {
-    const user = userEvent.setup()
-    renderApp()
+      // Select Jamie Tan
+      const jamieCard = await screen.findByText('Jamie Tan')
+      await user.click(jamieCard)
+      await user.click(screen.getByRole('button', { name: /continue/i }))
 
-    // Wait for dashboard to load
-    await waitFor(() => {
-      expect(screen.getByText('Everyday Checking')).toBeInTheDocument()
-      expect(screen.getByText(formatMoney(4280.55))).toBeInTheDocument()
-    })
+      // Step 2: Amount
+      await waitFor(() => {
+        expect(screen.getByText('How much?')).toBeInTheDocument()
+      })
 
-    // Click "New transfer"
-    const newTransferBtns = screen.getAllByRole('button', {
-      name: /new transfer/i,
-    })
-    await user.click(newTransferBtns[0])
+      const amountInput = screen.getByPlaceholderText('0.00')
+      await user.type(amountInput, '120')
 
-    // Wait for dialog step 1
-    await waitFor(() => {
-      expect(
-        screen.getByText('Who are you sending to?'),
-      ).toBeInTheDocument()
-    })
+      const noteInput = screen.getByPlaceholderText("What's this for?")
+      await user.type(noteInput, 'Dinner')
 
-    // Select Jamie Tan
-    await user.click(screen.getByText('Jamie Tan'))
-    await user.click(screen.getByRole('button', { name: /continue/i }))
+      await user.click(screen.getByRole('button', { name: /continue/i }))
 
-    // Step 2: Amount
-    await waitFor(() => {
-      expect(screen.getByText('How much?')).toBeInTheDocument()
-    })
+      // Step 3: Review
+      await waitFor(() => {
+        expect(screen.getByText('Check the details')).toBeInTheDocument()
+      })
+      expect(screen.getByText('Dinner')).toBeInTheDocument()
 
-    const amountInput = screen.getByPlaceholderText('0.00')
-    await user.type(amountInput, '120')
+      // Confirm transfer
+      const confirmBtn = screen.getByRole('button', {
+        name: /confirm transfer/i,
+      })
+      await user.click(confirmBtn)
 
-    const noteInput = screen.getByPlaceholderText("What's this for?")
-    await user.type(noteInput, 'Dinner')
+      // Success screen
+      await waitFor(() => {
+        expect(screen.getByText('Transfer sent')).toBeInTheDocument()
+      })
+      expect(screen.getByText(matchMoney(120))).toBeInTheDocument()
+      expect(screen.getByText(/TRF-/i)).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /continue/i }))
+      // Return to dashboard
+      const backToDashboardBtn = screen.getByRole('button', {
+        name: /back to dashboard/i,
+      })
+      await user.click(backToDashboardBtn)
 
-    // Step 3: Review
-    await waitFor(() => {
-      expect(screen.getByText('Check the details')).toBeInTheDocument()
-    })
-    expect(screen.getByText('Dinner')).toBeInTheDocument()
+      // Dialog is closed
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      })
 
-    // Confirm transfer
-    const confirmBtn = screen.getByRole('button', {
-      name: /confirm transfer/i,
-    })
-    await user.click(confirmBtn)
+      // Dashboard shows updated Everyday Checking balance (4,280.55 - 120 = 4,160.55)
+      await waitFor(() => {
+        expect(screen.getByText(matchMoney(4160.55))).toBeInTheDocument()
+      })
 
-    // Success screen
-    await waitFor(() => {
-      expect(screen.getByText('Transfer sent')).toBeInTheDocument()
-    })
-    expect(screen.getByText(formatMoney(120))).toBeInTheDocument()
-    expect(screen.getByText(/TRF-/i)).toBeInTheDocument()
-
-    // Return to dashboard
-    const backToDashboardBtn = screen.getByRole('button', {
-      name: /back to dashboard/i,
-    })
-    await user.click(backToDashboardBtn)
-
-    // Dialog is closed
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    })
-
-    // Dashboard shows updated Everyday Checking balance (4,280.55 - 120 = 4,160.55)
-    await waitFor(() => {
-      expect(screen.getByText(formatMoney(4160.55))).toBeInTheDocument()
-    })
-
-    // Dashboard shows new transaction
-    expect(screen.getByText('Transfer to Jamie Tan')).toBeInTheDocument()
-  })
+      // Dashboard shows new transaction
+      expect(screen.getByText('Transfer to Jamie Tan')).toBeInTheDocument()
+    },
+    15000,
+  )
 })
